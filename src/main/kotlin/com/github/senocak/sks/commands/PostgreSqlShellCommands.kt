@@ -21,7 +21,7 @@ class PostgreSqlShellCommands {
     private var currentHost: String? = null
     private var currentPort: Int? = null
     private var currentDatabase: String? = null
-    var currentUsername: String? = null
+    private var currentUsername: String? = null
     private var currentPassword: String? = null
 
     // db-connect localhost 54321 shelldb postgres senocak
@@ -317,6 +317,13 @@ class PostgreSqlShellCommands {
         dataSource.password = password
         return dataSource
     }
+
+    val dataSourceString: String?
+        get() =
+            when(jdbcTemplate) {
+                null -> null
+                else -> "jdbc:postgresql://$currentUsername:$currentPassword@$currentHost:$currentPort/$currentDatabase"
+            }
 
     private fun checkConnection() {
         if (jdbcTemplate == null)

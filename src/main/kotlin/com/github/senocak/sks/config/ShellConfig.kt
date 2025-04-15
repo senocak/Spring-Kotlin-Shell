@@ -20,8 +20,8 @@ class ShellConfig(private val advancedShellCommands: PostgreSqlShellCommands) {
                 now.hour < 18 -> AttributedStyle.DEFAULT.foreground(AttributedStyle.GREEN)  // Afternoon
                 else -> AttributedStyle.DEFAULT.foreground(AttributedStyle.BLUE)           // Evening
             }
-            val promptText: String = when {
-                advancedShellCommands.currentUsername != null -> "shell:${advancedShellCommands.currentUsername}> "
+            val promptText: String = when(advancedShellCommands.dataSourceString != null){
+                true -> "shell:${advancedShellCommands.dataSourceString}> "
                 else -> "shell:guest> "
             }
             AttributedString(promptText, baseStyle)
