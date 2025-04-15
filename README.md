@@ -39,12 +39,14 @@ The application provides a comprehensive set of commands for interacting with Po
 
 - `db-connect <host> <port> <database> <username> <password>` - Connect to PostgreSQL database
 - `db-status` - Show current database connection status
+- `db-info` - Show database server information
 
 ### Schema Operations
 
 - `db-list-tables` - List all tables in the database
 - `db-describe-table <tableName>` - Show column properties for a table
 - `db-create-table <tableName> <columnDefinitions>` - Create a new table
+- `db-show-indexes <tableName>` - Show indexes for a table
 
 ### Data Operations
 
@@ -53,6 +55,8 @@ The application provides a comprehensive set of commands for interacting with Po
 - `db-insert <tableName> <columns> <values>` - Insert a record into a table
 - `db-update <tableName> <setClause> <whereClause>` - Update records in a table
 - `db-delete <tableName> <whereClause>` - Delete records from a table
+- `db-export-query <query> <filePath> [format]` - Export query results to a file (csv, json)
+- `db-activity` - Show currently running queries
 
 ### Help
 
@@ -68,7 +72,7 @@ The application provides a comprehensive set of commands for interacting with Po
 ## Examples
 
 ```
-shell> db-connect localhost 5432 mydb postgres password
+shell> db-connect localhost 54321 shelldb postgres senocak
 Successfully connected to PostgreSQL database at localhost:5432/mydb
 
 shell> db-list-tables
@@ -108,6 +112,36 @@ Update executed successfully. Rows affected: 1
 
 shell> db-delete users "id=5"
 Delete executed successfully. Rows affected: 1
+
+shell> db-export-query "SELECT * FROM users" "/tmp/users.csv" "csv"
+Query results exported to CSV file: /tmp/users.csv
+
+shell> db-show-indexes users
+┌─────────────┬─────────────┬────────┬───────┬───────┐
+│Index Name   │Column Name  │Unique  │Type   │Order  │
+├─────────────┼─────────────┼────────┼───────┼───────┤
+│users_pkey   │id           │true    │OTHER  │A      │
+│idx_username │username     │false   │OTHER  │A      │
+└─────────────┴─────────────┴────────┴───────┴───────┘
+
+shell> db-info
+┌─────────────────────┬─────────────────────────┐
+│Property             │Value                    │
+├─────────────────────┼─────────────────────────┤
+│Database Product Name│PostgreSQL               │
+│Database Version     │14.5                     │
+│Driver Name          │PostgreSQL JDBC Driver   │
+│Driver Version       │42.5.0                   │
+│Max Connections      │100                      │
+│Database Size        │24 MB                    │
+└─────────────────────┴─────────────────────────┘
+
+shell> db-activity
+┌──────┬──────────┬─────────────────────────────────────────┐
+│pid   │username  │query                                    │
+├──────┼──────────┼─────────────────────────────────────────┤
+│12345 │postgres  │SELECT * FROM users WHERE active = true  │
+└──────┴──────────┴─────────────────────────────────────────┘
 ```
 
 ## Project Structure

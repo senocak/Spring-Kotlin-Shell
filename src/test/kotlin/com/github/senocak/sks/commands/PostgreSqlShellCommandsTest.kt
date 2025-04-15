@@ -346,5 +346,196 @@ class PostgreSqlShellCommandsTest {
         assertTrue(actual = result.contains(other = "db-connect"))
         assertTrue(actual = result.contains(other = "db-list-tables"))
         assertTrue(actual = result.contains(other = "db-query"))
+        // Check for new commands
+        assertTrue(actual = result.contains(other = "db-export-query"))
+        assertTrue(actual = result.contains(other = "db-show-indexes"))
+        assertTrue(actual = result.contains(other = "db-info"))
+        assertTrue(actual = result.contains(other = "db-activity"))
+    }
+
+    @Test
+    fun `test exportQuery to CSV success`() {
+        // Arrange
+        val query = "SELECT * FROM users"
+        val filePath = "test-output.csv"
+        val format = "csv"
+
+        // Mock the SqlRowSet behavior
+        `when`(jdbcTemplate.queryForRowSet(query)).thenReturn(sqlRowSet)
+        `when`(sqlRowSet.next()).thenReturn(true, true, false) // Header check + one row of data
+        `when`(sqlRowSet.metaData).thenReturn(sqlRowSetMetaData)
+        `when`(sqlRowSetMetaData.columnCount).thenReturn(2)
+        `when`(sqlRowSetMetaData.getColumnName(1)).thenReturn("id")
+        `when`(sqlRowSetMetaData.getColumnName(2)).thenReturn("username")
+        `when`(sqlRowSet.getObject(1)).thenReturn(1)
+        `when`(sqlRowSet.getObject(2)).thenReturn("user1")
+
+        // Create a temporary file that will be deleted after the test
+        val tempFile = java.io.File.createTempFile("test", ".csv")
+        tempFile.deleteOnExit()
+
+        try {
+            // Act
+            val result = postgreSqlShellCommands.exportQuery(query, tempFile.absolutePath, format)
+
+            // Assert
+            assertTrue(actual = result.contains(other = "Query results exported to CSV file"))
+            assertTrue(actual = tempFile.exists())
+
+            // Verify file content
+            val fileContent = tempFile.readText()
+            assertTrue(actual = fileContent.contains(other = "id,username"))
+            assertTrue(actual = fileContent.contains(other = "\"1\",\"user1\""))
+        } finally {
+            // Clean up
+            tempFile.delete()
+        }
+    }
+
+    @Test
+    fun `test exportQuery to JSON success`() {
+        // Arrange
+        val query = "SELECT * FROM users"
+        val filePath = "test-output.json"
+        val format = "json"
+
+        // Mock the SqlRowSet behavior
+        `when`(jdbcTemplate.queryForRowSet(query)).thenReturn(sqlRowSet)
+        `when`(sqlRowSet.next()).thenReturn(true, true, false) // Header check + one row of data
+        `when`(sqlRowSet.metaData).thenReturn(sqlRowSetMetaData)
+        `when`(sqlRowSetMetaData.columnCount).thenReturn(2)
+        `when`(sqlRowSetMetaData.getColumnName(1)).thenReturn("id")
+        `when`(sqlRowSetMetaData.getColumnName(2)).thenReturn("username")
+        `when`(sqlRowSet.getObject(1)).thenReturn(1)
+        `when`(sqlRowSet.getObject(2)).thenReturn("user1")
+
+        // Create a temporary file that will be deleted after the test
+        val tempFile = java.io.File.createTempFile("test", ".json")
+        tempFile.deleteOnExit()
+
+        try {
+            // Act
+            val result = postgreSqlShellCommands.exportQuery(query, tempFile.absolutePath, format)
+
+            // Assert
+            assertTrue(actual = result.contains(other = "Query results exported to JSON file"))
+            assertTrue(actual = tempFile.exists())
+
+            // Verify file content
+            val fileContent = tempFile.readText()
+            assertTrue(actual = fileContent.contains(other = "\"id\": 1"))
+            assertTrue(actual = fileContent.contains(other = "\"username\": \"user1\""))
+        } finally {
+            // Clean up
+            tempFile.delete()
+        }
+    }
+
+    @Test
+    fun `test showIndexes success`() {
+        // Arrange
+        val tableName = "users"
+
+        // Mock tables result set to indicate table exists
+        `when`(databaseMetaData.getTables(isNull(), eq("public"), eq(tableName), any()))
+            .thenReturn(tablesResultSet)
+        `when`(tablesResultSet.next()).thenReturn(true)
+
+        // Mock index information
+        val indexesResultSet = mock(ResultSet::class.java)
+        `when`(databaseMetaData.getIndexInfo(isNull(), eq("public"), eq(tableName), eq(false), eq(false)))
+            .thenReturn(indexesResultSet)
+        `when`(indexesResultSet.next()).thenReturn(true, true, false) // Two indexes
+        `when`(indexesResultSet.getString("INDEX_NAME")).thenReturn("idx_users_id", "idx_users_email")
+        `when`(indexesResultSet.getString("COLUMN_NAME")).thenReturn("id", "email")
+        `when`(indexesResultSet.getBoolean("NON_UNIQUE")).thenReturn(false, true) // First unique, second non-unique
+        `when`(indexesResultSet.getShort("TYPE")).thenReturn(DatabaseMetaData.tableIndexOther)
+        `when`(indexesResultSet.getString("ASC_OR_DESC")).thenReturn("A", "A")
+
+        // Act
+        val result = postgreSqlShellCommands.showIndexes(tableName)
+
+        // Assert
+        assertTrue(actual = result.contains(other = "Index Name"))
+        assertTrue(actual = result.contains(other = "Column Name"))
+        assertTrue(actual = result.contains(other = "Unique"))
+        assertTrue(actual = result.contains(other = "idx_users_id"))
+        assertTrue(actual = result.contains(other = "idx_users_email"))
+        assertTrue(actual = result.contains(other = "true")) // For unique index
+        assertTrue(actual = result.contains(other = "false")) // For non-unique index
+    }
+
+    @Test
+    fun `test showDatabaseInfo success`() {
+        // Arrange
+        // Mock database metadata
+        `when`(databaseMetaData.databaseProductName).thenReturn("PostgreSQL")
+        `when`(databaseMetaData.databaseProductVersion).thenReturn("14.5")
+        `when`(databaseMetaData.driverName).thenReturn("PostgreSQL JDBC Driver")
+        `when`(databaseMetaData.driverVersion).thenReturn("42.5.0")
+        `when`(databaseMetaData.jdbcMajorVersion).thenReturn(4)
+        `when`(databaseMetaData.jdbcMinorVersion).thenReturn(2)
+        `when`(databaseMetaData.maxConnections).thenReturn(100)
+        `when`(databaseMetaData.userName).thenReturn("testuser")
+
+        // Mock database size query
+        val sizeResult = mapOf("db_size" to "100 MB")
+        `when`(jdbcTemplate.queryForMap("SELECT pg_size_pretty(pg_database_size(current_database())) as db_size"))
+            .thenReturn(sizeResult)
+
+        // Act
+        val result = postgreSqlShellCommands.showDatabaseInfo()
+
+        // Assert
+        assertTrue(actual = result.contains(other = "Property"))
+        assertTrue(actual = result.contains(other = "Value"))
+        assertTrue(actual = result.contains(other = "Database Product Name"))
+        assertTrue(actual = result.contains(other = "PostgreSQL"))
+        assertTrue(actual = result.contains(other = "Database Version"))
+        assertTrue(actual = result.contains(other = "14.5"))
+        assertTrue(actual = result.contains(other = "Database Size"))
+        assertTrue(actual = result.contains(other = "100 MB"))
+    }
+
+    @Test
+    fun `test showDatabaseActivity success`() {
+        // Arrange
+        val query = """
+            SELECT pid, 
+                   usename as username, 
+                   application_name,
+                   client_addr as client_address,
+                   state,
+                   query_start,
+                   now() - query_start as duration,
+                   query
+            FROM pg_stat_activity
+            WHERE state != 'idle'
+              AND pid != pg_backend_pid()
+            ORDER BY query_start DESC
+        """.trimIndent()
+
+        // Mock the SqlRowSet behavior
+        `when`(jdbcTemplate.queryForRowSet(query)).thenReturn(sqlRowSet)
+        `when`(sqlRowSet.next()).thenReturn(true, true, false) // Header check + one row of data
+        `when`(sqlRowSet.metaData).thenReturn(sqlRowSetMetaData)
+        `when`(sqlRowSetMetaData.columnCount).thenReturn(3)
+        `when`(sqlRowSetMetaData.getColumnName(1)).thenReturn("pid")
+        `when`(sqlRowSetMetaData.getColumnName(2)).thenReturn("username")
+        `when`(sqlRowSetMetaData.getColumnName(3)).thenReturn("query")
+        `when`(sqlRowSet.getObject(1)).thenReturn(12345)
+        `when`(sqlRowSet.getObject(2)).thenReturn("postgres")
+        `when`(sqlRowSet.getObject(3)).thenReturn("SELECT * FROM users")
+
+        // Act
+        val result = postgreSqlShellCommands.showDatabaseActivity()
+
+        // Assert
+        assertTrue(actual = result.contains(other = "pid"))
+        assertTrue(actual = result.contains(other = "username"))
+        assertTrue(actual = result.contains(other = "query"))
+        assertTrue(actual = result.contains(other = "12345") || result.contains(other = " 12345 "))
+        assertTrue(actual = result.contains(other = "postgres") || result.contains(other = " postgres "))
+        assertTrue(actual = result.contains(other = "SELECT * FROM users") || result.contains(other = " SELECT * FROM users "))
     }
 }

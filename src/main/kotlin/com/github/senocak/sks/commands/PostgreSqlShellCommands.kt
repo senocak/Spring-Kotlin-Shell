@@ -273,6 +273,259 @@ class PostgreSqlShellCommands {
                 "Not connected to any database. Use db-connect to establish a connection."
         }
 
+    @ShellMethod(key = ["db-export-query"], value = "Execute a query and export results to a file", group = "PostgreSQL Operations")
+    fun exportQuery(
+        @ShellOption(help = "SQL query") query: String,
+        @ShellOption(help = "Output file path") filePath: String,
+        @ShellOption(help = "Export format (csv, json)", defaultValue = "csv") format: String
+    ): String {
+        checkConnection()
+        if (!query.trim().uppercase().startsWith(prefix = "SELECT"))
+            return "Only SELECT queries are allowed with this command."
+        try {
+            val rows: SqlRowSet = jdbcTemplate!!.queryForRowSet(query)
+            val metadata: SqlRowSetMetaData = rows.metaData
+            val columnCount: Int = metadata.columnCount
+            if (!rows.next())
+                return "Query executed successfully. No results to export."
+
+            // Reset the cursor
+            rows.beforeFirst()
+
+            // Create output file
+            val file = java.io.File(filePath)
+            file.parentFile?.mkdirs() // Create parent directories if they don't exist
+
+            when (format.lowercase()) {
+                "csv" -> {
+                    java.io.FileWriter(file).use { writer ->
+                        // Write headers
+                        val headers = (1..columnCount).map { i -> metadata.getColumnName(i) }
+                        writer.write(headers.joinToString(","))
+                        writer.write("\n")
+
+                        // Write data
+                        while (rows.next()) {
+                            val rowData = (1..columnCount).map { i -> 
+                                val value = rows.getObject(i)?.toString() ?: ""
+                                // Escape commas and quotes in CSV
+                                "\"${value.replace("\"", "\"\"")}\""
+                            }
+                            writer.write(rowData.joinToString(","))
+                            writer.write("\n")
+                        }
+                    }
+                    return "Query results exported to CSV file: $filePath"
+                }
+                "json" -> {
+                    java.io.FileWriter(file).use { writer ->
+                        val headers = (1..columnCount).map { i -> metadata.getColumnName(i) }
+                        writer.write("[\n")
+
+                        var firstRow = true
+                        while (rows.next()) {
+                            if (!firstRow) writer.write(",\n") else firstRow = false
+
+                            writer.write("  {")
+                            val rowData = (1..columnCount).map { i -> 
+                                val columnName = metadata.getColumnName(i)
+                                val value = rows.getObject(i)?.toString() ?: "null"
+                                // Format value based on type
+                                val formattedValue = when {
+                                    value == "null" -> "null"
+                                    // Try to parse as number
+                                    value.toDoubleOrNull() != null -> value
+                                    // Otherwise treat as string
+                                    else -> "\"${value.replace("\"", "\\\"")}\""
+                                }
+                                "\"$columnName\": $formattedValue"
+                            }
+                            writer.write(rowData.joinToString(", "))
+                            writer.write("}")
+                        }
+                        writer.write("\n]")
+                    }
+                    return "Query results exported to JSON file: $filePath"
+                }
+                else -> return "Unsupported export format: $format. Supported formats are: csv, json"
+            }
+        } catch (e: Exception) {
+            return "Error exporting query results: ${e.localizedMessage}"
+        }
+    }
+
+    @ShellMethod(key = ["db-show-indexes"], value = "Show indexes for a table", group = "PostgreSQL Operations")
+    fun showIndexes(@ShellOption(help = "Table name") tableName: String): String {
+        checkConnection()
+        try {
+            val connection: Connection = jdbcTemplate!!.dataSource!!.connection
+            try {
+                val metaData: DatabaseMetaData = connection.metaData
+
+                // Check if table exists
+                val tables: ResultSet = metaData.getTables(null, "public", tableName, arrayOf("TABLE"))
+                if (!tables.next())
+                    return "Table '$tableName' does not exist."
+
+                // Get index information
+                val indexes: ResultSet = metaData.getIndexInfo(null, "public", tableName, false, false)
+                val indexList: MutableList<Array<String?>> = mutableListOf()
+
+                while (indexes.next()) {
+                    val indexName: String? = indexes.getString("INDEX_NAME")
+                    if (indexName != null) {
+                        val columnName: String = indexes.getString("COLUMN_NAME")
+                        val nonUnique: Boolean = indexes.getBoolean("NON_UNIQUE")
+                        val type: String = when(indexes.getShort("TYPE")) {
+                            DatabaseMetaData.tableIndexStatistic -> "STATISTIC"
+                            DatabaseMetaData.tableIndexClustered -> "CLUSTERED"
+                            DatabaseMetaData.tableIndexHashed -> "HASHED"
+                            DatabaseMetaData.tableIndexOther -> "OTHER"
+                            else -> "UNKNOWN"
+                        }
+                        val ascOrDesc: String = indexes.getString("ASC_OR_DESC") ?: "N/A"
+
+                        indexList.add(arrayOf(indexName, columnName, (!nonUnique).toString(), type, ascOrDesc))
+                    }
+                }
+
+                if (indexList.isEmpty())
+                    return "No indexes found for table '$tableName'."
+
+                // Create table for display
+                val data: Array<Array<String?>> = Array(size = indexList.size + 1) { arrayOfNulls(size = 5) }
+                data[0][0] = "Index Name"
+                data[0][1] = "Column Name"
+                data[0][2] = "Unique"
+                data[0][3] = "Type"
+                data[0][4] = "Order"
+
+                indexList.forEachIndexed { index: Int, indexInfo: Array<String?> ->
+                    data[index + 1][0] = indexInfo[0]
+                    data[index + 1][1] = indexInfo[1]
+                    data[index + 1][2] = indexInfo[2]
+                    data[index + 1][3] = indexInfo[3]
+                    data[index + 1][4] = indexInfo[4]
+                }
+
+                val tableModel = ArrayTableModel(data)
+                val tableBuilder = TableBuilder(tableModel)
+                tableBuilder.addFullBorder(BorderStyle.fancy_light)
+                return tableBuilder.build().render(100)
+            } finally {
+                connection.close()
+            }
+        } catch (e: Exception) {
+            return "Error retrieving indexes: ${e.localizedMessage}"
+        }
+    }
+
+    @ShellMethod(key = ["db-info"], value = "Show database server information", group = "PostgreSQL Operations")
+    fun showDatabaseInfo(): String {
+        checkConnection()
+        try {
+            val connection: Connection = jdbcTemplate!!.dataSource!!.connection
+            try {
+                val metaData: DatabaseMetaData = connection.metaData
+
+                // Collect database information
+                val info = mutableListOf<Pair<String, String>>()
+                info.add(Pair("Database Product Name", metaData.databaseProductName))
+                info.add(Pair("Database Version", metaData.databaseProductVersion))
+                info.add(Pair("Driver Name", metaData.driverName))
+                info.add(Pair("Driver Version", metaData.driverVersion))
+                info.add(Pair("JDBC Major Version", metaData.jdbcMajorVersion.toString()))
+                info.add(Pair("JDBC Minor Version", metaData.jdbcMinorVersion.toString()))
+                info.add(Pair("Max Connections", metaData.maxConnections.toString()))
+                info.add(Pair("Username", metaData.userName))
+
+                // Get database size
+                try {
+                    val sizeQuery = "SELECT pg_size_pretty(pg_database_size(current_database())) as db_size"
+                    val sizeResult = jdbcTemplate!!.queryForMap(sizeQuery)
+                    info.add(Pair("Database Size", sizeResult["db_size"].toString()))
+                } catch (e: Exception) {
+                    // Ignore if this query fails
+                }
+
+                // Create table for display
+                val data: Array<Array<String?>> = Array(size = info.size + 1) { arrayOfNulls(size = 2) }
+                data[0][0] = "Property"
+                data[0][1] = "Value"
+
+                info.forEachIndexed { index: Int, (property, value): Pair<String, String> ->
+                    data[index + 1][0] = property
+                    data[index + 1][1] = value
+                }
+
+                val tableModel = ArrayTableModel(data)
+                val tableBuilder = TableBuilder(tableModel)
+                tableBuilder.addFullBorder(BorderStyle.fancy_light)
+                return tableBuilder.build().render(100)
+            } finally {
+                connection.close()
+            }
+        } catch (e: Exception) {
+            return "Error retrieving database information: ${e.localizedMessage}"
+        }
+    }
+
+    @ShellMethod(key = ["db-activity"], value = "Show currently running queries", group = "PostgreSQL Operations")
+    fun showDatabaseActivity(): String {
+        checkConnection()
+        try {
+            // Query to get active queries in PostgreSQL
+            val query = """
+                SELECT pid, 
+                       usename as username, 
+                       application_name,
+                       client_addr as client_address,
+                       state,
+                       query_start,
+                       now() - query_start as duration,
+                       query
+                FROM pg_stat_activity
+                WHERE state != 'idle'
+                  AND pid != pg_backend_pid()
+                ORDER BY query_start DESC
+            """.trimIndent()
+
+            val rows: SqlRowSet = jdbcTemplate!!.queryForRowSet(query)
+            val metadata: SqlRowSetMetaData = rows.metaData
+            val columnCount: Int = metadata.columnCount
+
+            if (!rows.next())
+                return "No active queries found."
+
+            // Reset the cursor
+            rows.beforeFirst()
+
+            // Prepare data for table display
+            val resultList: MutableList<Array<String?>> = mutableListOf()
+            val headers = Array<String?>(size = columnCount) { null }
+            (1..columnCount).forEach { i: Int ->
+                headers[i - 1] = metadata.getColumnName(i)
+            }
+            resultList.add(element = headers)
+
+            while (rows.next()) {
+                val rowData: Array<String?> = arrayOfNulls(size = columnCount)
+                (1..columnCount).forEach { i: Int ->
+                    rowData[i - 1] = rows.getObject(i)?.toString() ?: "NULL"
+                }
+                resultList.add(element = rowData)
+            }
+
+            val data: Array<Array<String?>> = resultList.toTypedArray()
+            val tableModel = ArrayTableModel(data)
+            val tableBuilder = TableBuilder(tableModel)
+            tableBuilder.addFullBorder(BorderStyle.fancy_light)
+            return tableBuilder.build().render(150)
+        } catch (e: Exception) {
+            return "Error retrieving database activity: ${e.localizedMessage}"
+        }
+    }
+
     @ShellMethod(key = ["db-help"], value = "Show available PostgreSQL commands", group = "PostgreSQL Operations")
     fun help(): String {
         return """
@@ -281,11 +534,13 @@ class PostgreSqlShellCommands {
             Connection:
               db-connect <host> <port> <database> <username> <password> - Connect to PostgreSQL database
               db-status - Show current database connection status
+              db-info - Show database server information
 
             Schema Operations:
               db-list-tables - List all tables in the database
               db-describe-table <tableName> - Show column properties for a table
               db-create-table <tableName> <columnDefinitions> - Create a new table
+              db-show-indexes <tableName> - Show indexes for a table
 
             Data Operations:
               db-query <query> [maxRows] - Execute a SELECT query
@@ -293,6 +548,8 @@ class PostgreSqlShellCommands {
               db-insert <tableName> <columns> <values> - Insert a record into a table
               db-update <tableName> <setClause> <whereClause> - Update records in a table
               db-delete <tableName> <whereClause> - Delete records from a table
+              db-export-query <query> <filePath> [format] - Export query results to a file (csv, json)
+              db-activity - Show currently running queries
 
             Help:
               db-help - Show this help message
@@ -306,6 +563,10 @@ class PostgreSqlShellCommands {
               db-insert users "username,email" "john_doe,john@example.com"
               db-update users "email=new@example.com" "id=1"
               db-delete users "id=5"
+              db-export-query "SELECT * FROM users" "/tmp/users.csv" "csv"
+              db-show-indexes users
+              db-info
+              db-activity
         """.trimIndent()
     }
 
