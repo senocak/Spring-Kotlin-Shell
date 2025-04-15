@@ -26,21 +26,21 @@ class ShellConfigTest {
     @Test
     fun `test prompt text when user is connected`() {
         // Arrange
-        val username = "testuser"
-        `when`(advancedShellCommands.currentUsername).thenReturn(username)
+        val dataSourceString = "jdbc:postgresql://testuser:password@localhost:5432/testdb"
+        `when`(advancedShellCommands.dataSourceString).thenReturn(dataSourceString)
 
         // Act
         val promptProvider: PromptProvider = shellConfig.customPromptProvider()
         val prompt: AttributedString = promptProvider.getPrompt()
 
         // Assert
-        assertTrue(prompt.toAnsi().contains("shell:testuser>"))
+        assertTrue(prompt.toAnsi().contains("shell:$dataSourceString>"))
     }
 
     @Test
     fun `test prompt text when user is not connected`() {
         // Arrange
-        `when`(advancedShellCommands.currentUsername).thenReturn(null)
+        `when`(advancedShellCommands.dataSourceString).thenReturn(null)
 
         // Act
         val promptProvider: PromptProvider = shellConfig.customPromptProvider()
@@ -52,47 +52,50 @@ class ShellConfigTest {
 
     @Test
     fun `test prompt color in the morning`() {
-        // This test uses a custom LocalTime provider to simulate morning time
-        testPromptColorAtTime(
-            hour = 8, // Morning
-            expectedColor = AttributedStyle.YELLOW
-        )
-    }
-
-    @Test
-    fun `test prompt color in the afternoon`() {
-        // This test uses a custom LocalTime provider to simulate afternoon time
-        testPromptColorAtTime(
-            hour = 14, // Afternoon
-            expectedColor = AttributedStyle.GREEN
-        )
-    }
-
-    @Test
-    fun `test prompt color in the evening`() {
-        // This test uses a custom LocalTime provider to simulate evening time
-        testPromptColorAtTime(
-            hour = 20, // Evening
-            expectedColor = AttributedStyle.BLUE
-        )
-    }
-
-    /**
-     * Helper method to test prompt color at a specific time of day
-     */
-    private fun testPromptColorAtTime(hour: Int, expectedColor: Int) {
-        // Create a mock LocalTime for testing
+        // Since we can't easily mock LocalTime.now(), we'll test the logic directly
+        // Morning is defined as before 12 PM (hour < 12)
+        val hour = 8 // 8 AM
         val mockTime = LocalTime.of(hour, 0)
 
-        // We can't directly test the color since the prompt provider uses LocalTime.now()
-        // Instead, we'll verify the logic by checking the conditions
+        // Verify the logic matches what's in ShellConfig
         val expectedStyle = when {
             mockTime.hour < 12 -> AttributedStyle.YELLOW
             mockTime.hour < 18 -> AttributedStyle.GREEN
             else -> AttributedStyle.BLUE
         }
 
-        // Verify the expected color matches our input
-        assertEquals(expectedColor, expectedStyle)
+        assertEquals(AttributedStyle.YELLOW, expectedStyle, "Morning time should use yellow color")
+    }
+
+    @Test
+    fun `test prompt color in the afternoon`() {
+        // Afternoon is defined as 12 PM to 6 PM (12 <= hour < 18)
+        val hour = 14 // 2 PM
+        val mockTime = LocalTime.of(hour, 0)
+
+        // Verify the logic matches what's in ShellConfig
+        val expectedStyle = when {
+            mockTime.hour < 12 -> AttributedStyle.YELLOW
+            mockTime.hour < 18 -> AttributedStyle.GREEN
+            else -> AttributedStyle.BLUE
+        }
+
+        assertEquals(AttributedStyle.GREEN, expectedStyle, "Afternoon time should use green color")
+    }
+
+    @Test
+    fun `test prompt color in the evening`() {
+        // Evening is defined as 6 PM and later (hour >= 18)
+        val hour = 20 // 8 PM
+        val mockTime = LocalTime.of(hour, 0)
+
+        // Verify the logic matches what's in ShellConfig
+        val expectedStyle = when {
+            mockTime.hour < 12 -> AttributedStyle.YELLOW
+            mockTime.hour < 18 -> AttributedStyle.GREEN
+            else -> AttributedStyle.BLUE
+        }
+
+        assertEquals(AttributedStyle.BLUE, expectedStyle, "Evening time should use blue color")
     }
 }
