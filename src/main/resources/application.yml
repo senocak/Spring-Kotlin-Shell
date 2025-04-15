@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: Spring-Kolin-Shell
+  shell:
+    interactive:
+      enabled: true
+    script:
+      enabled: true
