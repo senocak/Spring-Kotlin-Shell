@@ -1,6 +1,6 @@
 spring:
   application:
-    name: Spring-Kolin-Shell
+    name: Spring-Kotlin-Shell
   shell:
     interactive:
       enabled: true

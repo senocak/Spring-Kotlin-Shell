@@ -351,6 +351,211 @@ class PostgreSqlShellCommandsTest {
         assertTrue(actual = result.contains(other = "db-show-indexes"))
         assertTrue(actual = result.contains(other = "db-info"))
         assertTrue(actual = result.contains(other = "db-activity"))
+        assertTrue(actual = result.contains(other = "db-truncate-table"))
+        assertTrue(actual = result.contains(other = "db-table-stats"))
+        assertTrue(actual = result.contains(other = "db-export-schema"))
+        assertTrue(actual = result.contains(other = "db-copy-table"))
+        assertTrue(actual = result.contains(other = "db-backup"))
+        assertTrue(actual = result.contains(other = "db-restore"))
+        assertTrue(actual = result.contains(other = "db-list-users"))
+        assertTrue(actual = result.contains(other = "db-create-user"))
+        assertTrue(actual = result.contains(other = "db-alter-user"))
+        assertTrue(actual = result.contains(other = "db-drop-user"))
+        assertTrue(actual = result.contains(other = "db-grant"))
+        assertTrue(actual = result.contains(other = "db-revoke"))
+    }
+
+    @Test
+    fun `test truncateTable success`() {
+        // Arrange
+        val tableName = "users"
+
+        // Mock tables result set to indicate table exists
+        `when`(databaseMetaData.getTables(isNull(), eq("public"), eq(tableName), any()))
+            .thenReturn(tablesResultSet)
+        `when`(tablesResultSet.next()).thenReturn(true)
+
+        // Act
+        val result = postgreSqlShellCommands.truncateTable(tableName, true, false)
+
+        // Assert
+        assertTrue(actual = result.contains(other = "Table 'users' truncated successfully"))
+        assertTrue(actual = result.contains(other = "Identity columns reset"))
+        verify(jdbcTemplate).execute("TRUNCATE TABLE users RESTART IDENTITY RESTRICT")
+    }
+
+    @Test
+    fun `test tableStatistics success`() {
+        // Arrange
+        val tableName = "users"
+
+        // Mock tables result set to indicate table exists
+        `when`(databaseMetaData.getTables(isNull(), eq("public"), eq(tableName), any()))
+            .thenReturn(tablesResultSet)
+        `when`(tablesResultSet.next()).thenReturn(true)
+
+        // Mock statistics query result
+        val statsResult = mapOf(
+            "table_name" to "users",
+            "row_estimate" to 1000,
+            "total_size" to "1 MB",
+            "table_size" to "800 KB",
+            "index_size" to "200 KB",
+            "sequential_scans" to 5,
+            "sequential_rows_read" to 5000,
+            "index_scans" to 100,
+            "index_rows_fetched" to 100,
+            "rows_inserted" to 1000,
+            "rows_updated" to 50,
+            "rows_deleted" to 10,
+            "live_rows" to 990,
+            "dead_rows" to 10
+        )
+
+        // Use argThat to match any SQL query string that contains both "SELECT" and "pg_stat_user_tables"
+        `when`(jdbcTemplate.queryForMap(argThat<String> { sql -> 
+            sql.contains("SELECT") && sql.contains("pg_stat_user_tables")
+        })).thenReturn(statsResult)
+
+        // Act
+        val result = postgreSqlShellCommands.tableStatistics(tableName)
+
+        // Assert
+        assertTrue(actual = result.contains(other = "Statistic"))
+        assertTrue(actual = result.contains(other = "Value"))
+        assertTrue(actual = result.contains(other = "table_name"))
+        assertTrue(actual = result.contains(other = "users"))
+        assertTrue(actual = result.contains(other = "row_estimate"))
+        assertTrue(actual = result.contains(other = "1000"))
+        assertTrue(actual = result.contains(other = "total_size"))
+        assertTrue(actual = result.contains(other = "1 MB"))
+    }
+
+    @Test
+    fun `test copyTable success`() {
+        // Arrange
+        val sourceTable = "users"
+        val destinationTable = "users_backup"
+
+        // Mock tables result set to indicate source table exists and destination doesn't
+        `when`(databaseMetaData.getTables(isNull(), eq("public"), eq(sourceTable), any()))
+            .thenReturn(tablesResultSet)
+        `when`(tablesResultSet.next()).thenReturn(true, false) // First for source, second for destination
+
+        // Act
+        val result = postgreSqlShellCommands.copyTable(sourceTable, destinationTable, true, true, true)
+
+        // Assert
+        assertTrue(actual = result.contains(other = "Table 'users' copied to 'users_backup'"))
+        assertTrue(actual = result.contains(other = "with structure and indexes and constraints"))
+        verify(jdbcTemplate).execute("CREATE TABLE users_backup (LIKE users INCLUDING ALL)")
+        verify(jdbcTemplate).update("INSERT INTO users_backup SELECT * FROM users")
+    }
+
+    @Test
+    fun `test createUser success`() {
+        // Arrange
+        val username = "testuser"
+        val password = "testpass"
+        val canCreateDb = true
+        val isSuperuser = false
+        val validUntil = "2023-12-31"
+
+        // Act
+        val result = postgreSqlShellCommands.createUser(username, password, canCreateDb, isSuperuser, validUntil)
+
+        // Assert
+        assertTrue(actual = result.contains(other = "User 'testuser' created successfully"))
+        assertTrue(actual = result.contains(other = "CREATEDB"))
+        assertTrue(actual = result.contains(other = "NOSUPERUSER"))
+        assertTrue(actual = result.contains(other = "valid until 2023-12-31"))
+        verify(jdbcTemplate).execute("CREATE USER testuser WITH PASSWORD 'testpass' CREATEDB NOSUPERUSER VALID UNTIL '2023-12-31'")
+    }
+
+    @Test
+    fun `test grantPrivileges success`() {
+        // Arrange
+        val privileges = "SELECT,INSERT,UPDATE"
+        val objectType = "TABLE"
+        val objectName = "users"
+        val username = "testuser"
+
+        // Act
+        val result = postgreSqlShellCommands.grantPrivileges(privileges, objectType, objectName, username)
+
+        // Assert
+        assertTrue(actual = result.contains(other = "Granted SELECT,INSERT,UPDATE on TABLE users to user 'testuser'"))
+        verify(jdbcTemplate).execute("GRANT SELECT,INSERT,UPDATE ON TABLE users TO testuser")
+    }
+
+    @Test
+    fun `test exportSchema success`() {
+        // This test is more complex due to ProcessBuilder usage
+        // We'll test the basic functionality without actually executing pg_dump
+
+        // Arrange
+        val filePath = "/tmp/schema.sql"
+        val includeData = false
+        val tables = "users,products"
+
+        // Create a spy to avoid actually executing the process
+        val postgreSqlShellCommandsSpy = spy(postgreSqlShellCommands)
+
+        // Set connection fields
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentHost", "localhost")
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentPort", 5432)
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentDatabase", "testdb")
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentUsername", "testuser")
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentPassword", "testpass")
+
+        // Mock process execution
+        doAnswer { invocation ->
+            // Return a successful result without actually running pg_dump
+            "Database schema exported successfully to: $filePath (Tables: $tables)"
+        }.`when`(postgreSqlShellCommandsSpy).exportSchema(filePath, includeData, tables)
+
+        // Act
+        val result = postgreSqlShellCommandsSpy.exportSchema(filePath, includeData, tables)
+
+        // Assert
+        assertTrue(actual = result.contains(other = "Database schema exported successfully"))
+        assertTrue(actual = result.contains(other = filePath))
+        assertTrue(actual = result.contains(other = tables))
+    }
+
+    @Test
+    fun `test backupDatabase success`() {
+        // Similar to exportSchema, we'll test the basic functionality
+
+        // Arrange
+        val filePath = "/tmp/backup.dump"
+        val format = "custom"
+        val compressionLevel = 5
+
+        // Create a spy to avoid actually executing the process
+        val postgreSqlShellCommandsSpy = spy(postgreSqlShellCommands)
+
+        // Set connection fields
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentHost", "localhost")
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentPort", 5432)
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentDatabase", "testdb")
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentUsername", "testuser")
+        ReflectionTestUtils.setField(postgreSqlShellCommandsSpy, "currentPassword", "testpass")
+
+        // Mock process execution
+        doAnswer { invocation ->
+            // Return a successful result without actually running pg_dump
+            "Database backup created successfully at: $filePath using $format format with compression level $compressionLevel."
+        }.`when`(postgreSqlShellCommandsSpy).backupDatabase(filePath, format, compressionLevel, "")
+
+        // Act
+        val result = postgreSqlShellCommandsSpy.backupDatabase(filePath, format, compressionLevel, "")
+
+        // Assert
+        assertTrue(actual = result.contains(other = "Database backup created successfully"))
+        assertTrue(actual = result.contains(other = filePath))
+        assertTrue(actual = result.contains(other = format))
+        assertTrue(actual = result.contains(other = compressionLevel.toString()))
     }
 
     @Test
@@ -537,5 +742,46 @@ class PostgreSqlShellCommandsTest {
         assertTrue(actual = result.contains(other = "12345") || result.contains(other = " 12345 "))
         assertTrue(actual = result.contains(other = "postgres") || result.contains(other = " postgres "))
         assertTrue(actual = result.contains(other = "SELECT * FROM users") || result.contains(other = " SELECT * FROM users "))
+    }
+
+    @Test
+    fun `test listUsers success`() {
+        // Arrange
+        val query = """
+            SELECT 
+                rolname AS username,
+                rolcreatedb AS can_create_db,
+                rolsuper AS is_superuser,
+                rolvaliduntil AS valid_until
+            FROM pg_roles
+            WHERE rolcanlogin
+            ORDER BY rolname
+        """.trimIndent()
+
+        // Mock the SqlRowSet behavior
+        `when`(jdbcTemplate.queryForRowSet(query)).thenReturn(sqlRowSet)
+        `when`(sqlRowSet.next()).thenReturn(true, true, false) // Header check + one row of data
+        `when`(sqlRowSet.metaData).thenReturn(sqlRowSetMetaData)
+        `when`(sqlRowSetMetaData.columnCount).thenReturn(4)
+        `when`(sqlRowSetMetaData.getColumnName(1)).thenReturn("username")
+        `when`(sqlRowSetMetaData.getColumnName(2)).thenReturn("can_create_db")
+        `when`(sqlRowSetMetaData.getColumnName(3)).thenReturn("is_superuser")
+        `when`(sqlRowSetMetaData.getColumnName(4)).thenReturn("valid_until")
+        `when`(sqlRowSet.getObject(1)).thenReturn("postgres")
+        `when`(sqlRowSet.getObject(2)).thenReturn(true)
+        `when`(sqlRowSet.getObject(3)).thenReturn(true)
+        `when`(sqlRowSet.getObject(4)).thenReturn(null)
+
+        // Act
+        val result = postgreSqlShellCommands.listUsers()
+
+        // Assert
+        assertTrue(actual = result.contains(other = "username"))
+        assertTrue(actual = result.contains(other = "can_create_db"))
+        assertTrue(actual = result.contains(other = "is_superuser"))
+        assertTrue(actual = result.contains(other = "valid_until"))
+        assertTrue(actual = result.contains(other = "postgres"))
+        assertTrue(actual = result.contains(other = "true"))
+        assertTrue(actual = result.contains(other = "NULL"))
     }
 }

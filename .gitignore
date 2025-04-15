@@ -40,3 +40,4 @@ out/
 .kotlin
 *.log
 *.csv
+*.dump
